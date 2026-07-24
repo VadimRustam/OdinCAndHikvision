@@ -75,9 +75,7 @@ class HikvisionClient:
             "Accept": "application/json",
         }
 
-        # Инициализируем авторизацию
-        self.auth: Optional[HTTPDigestAuth] = None
-        self.resetAuth()
+        self.auth: Optional[HTTPDigestAuth] = HTTPDigestAuth(self.username, self.password)
 
     def resetAuth(self) -> None:
         """Сброс и повторная инициализация Digest авторизации."""
@@ -207,7 +205,6 @@ class AddUserByAutoCard:
         }
 
         response = self.api.request("PUT", url, headers=self.api.headers_json, json=payload)
-        # print(f"response.text addPhotoToUserByUrl возвращает: {response.text}")
         return response.text
 
     def addCard(self, card_number: str, employee_no: str) -> str:
@@ -253,7 +250,6 @@ class AddUserByAutoCard:
         if not response:
             return None
 
-        # 1. Пробуем разобрать как JSON (формат ответа при ошибке чтения карты)
         try:
             data = json.loads(response)
             if isinstance(data, dict) and "statusCode" in data:
@@ -261,7 +257,6 @@ class AddUserByAutoCard:
         except (json.JSONDecodeError, ValueError, TypeError):
             pass
 
-        # 2. Пробуем разобрать как XML (формат ответа при ошибке захвата лица)
         try:
             ns = {
             'ns': "http://www.hikvision.com/ver10/XMLSchema",
@@ -282,10 +277,12 @@ class AddUserByAutoCard:
         try:
             response = self.api.request("GET", request_url, headers=self.api.headers_json)
         except HikvisionRequestFailed as e:
-            # Терминал отвечает HTTP 404 + statusCode == 3 ("Device Error", subStatusCode "deviceError"),
-            # если карта не была приложена в течение отведенного времени.
-            # Это отдельная, "ожидаемая" ошибка - сообщаем о ней отдельным исключением,
-            # чтобы выше (например, в Odoo) можно было показать понятное сообщение пользователю.
+            """
+            Терминал отвечает HTTP 404 + statusCode == 3 ("Device Error", subStatusCode "deviceError"),
+            если карта не была приложена в течение отведенного времени.
+            Это отдельная, "ожидаемая" ошибка - сообщаем о ней отдельным исключением,
+            чтобы выше (например, в Odoo) можно было показать понятное сообщение пользователю.
+            """
             if self.extractHikvisionStatusCode(e.last_response) == 3:
                 logger.warning("Карта не была приложена к терминалу в течение отведенного времени.")
                 raise CardCaptureTimeoutError() from e
@@ -324,10 +321,12 @@ class AddUserByAutoCard:
         try:
             response = self.api.request("POST", url, headers=self.api.headers_xml, data=xml_payload)
         except HikvisionRequestFailed as e:
-            # Терминал отвечает HTTP 400 + statusCode == 3 ("Device Error", subStatusCode "captureTimeout"),
-            # если лицо не было распознано в течение отведенного времени.
-            # Это отдельная, "ожидаемая" ошибка - сообщаем о ней отдельным исключением,
-            # чтобы выше (например, в Odoo) можно было показать понятное сообщение пользователю.
+            """
+            Терминал отвечает HTTP 400 + statusCode == 3 ("Device Error", subStatusCode "captureTimeout"),
+            если лицо не было распознано в течение отведенного времени.
+            Это отдельная, "ожидаемая" ошибка - сообщаем о ней отдельным исключением,
+            чтобы выше (например, в Odoo) можно было показать понятное сообщение пользователю.
+            """
             if self.extractHikvisionStatusCode(e.last_response) == 3:
                 logger.warning("Лицо не было распознано терминалом в течение отведенного времени.")
                 raise FaceCaptureTimeoutError() from e
@@ -363,8 +362,7 @@ class AddUserByAutoCard:
             "UserInfo": {
                 "employeeNo": str(id_people),
                 "name": username,
-                "userType": "visitor",
-                # "gender": "male",
+                "userType": "visitor", # "gender" так же можно указать такое поле 
                 "Valid": {
                     "enable": True,
                     "beginTime": "2000-01-01T00:00:00",
@@ -390,9 +388,7 @@ class AddUserByAutoCard:
         data = {
             "CardInfoDelCond": {
                 "employeeNo": employee_no,
-                "cardNo": card_number,
-                # "cardType": "normalCard",
-                # "leaderCard": "1"
+                "cardNo": card_number, # "cardType": "normalCard", "leaderCard": "1" параметры какие я использовал, пусть будут
             }
         }
         self.api.request("PUT", request_url, headers=self.api.headers_json, json=data)
