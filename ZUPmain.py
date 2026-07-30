@@ -22,7 +22,6 @@ from collections import defaultdict
 from datetime import datetime
 import json
 import os
-import sys
 import xml.etree.ElementTree as ET
 import logging
 import time
@@ -49,10 +48,10 @@ class ZupmainRequestFailed(Exception):
 
     def __init__(
         self,
-        endpoint,
-        message,
-        status_code=None,
-        error_type=None,
+        endpoint: str,
+        message: str,
+        status_code: int = None ,
+        error_type: str = "UNKNOWN",
         last_error=None,
         last_response=None
     ):
