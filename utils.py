@@ -1,6 +1,10 @@
 import re
 import time
 from functools import wraps
+from typing import TypeVar, ParamSpec, Callable
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 def normalizeFio(fio: str) -> str:
     """
@@ -19,9 +23,9 @@ def normalizeFio(fio: str) -> str:
 
     return fio
 
-def measure_time(func):
+def measure_time(func: Callable[P, R]) -> Callable[P, R]: 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         start = time.time()      
         result = func(*args, **kwargs)
         end = time.time()
