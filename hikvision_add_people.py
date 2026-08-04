@@ -96,12 +96,8 @@ class HikvisionClient:
                     f"Попытка {attempt}/{retries}: {method} {url}\n"
                 )
                 response = requests.request(
-                    method=method, url=url, auth=self.auth, **kwargs
+                    method=method, url=url, auth=self.auth, timeout=30, **kwargs
                 )
-                
-                # response = requests.request(
-                #     method=method, url=url, auth=self.auth, timeout=20, **kwargs
-                # )
                 
                 if 200 <= response.status_code < 300:
                     return response
