@@ -3,7 +3,7 @@ from pathlib import Path
 import random
 import time
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 import requests
 from requests.auth import HTTPDigestAuth
 import json
@@ -15,7 +15,13 @@ logger.setLevel(logging.DEBUG)
 
 class HikvisionRequestFailed(Exception):
     """Общая ошибка запроса после всех попыток"""
-    def __init__(self, url: str, message: str, last_error: str = None, last_response: str = None):
+    def __init__(
+        self,
+        url: str,
+        message: str,
+        last_error: Optional[str] = None,
+        last_response: Optional[str] = None
+    ) -> None:
         self.url = url
         self.last_error = last_error
         self.last_response = last_response
@@ -75,12 +81,20 @@ class HikvisionClient:
             "Accept": "application/json",
         }
 
-        self.auth: Optional[HTTPDigestAuth] = HTTPDigestAuth(self.username, self.password)
+        self.auth: HTTPDigestAuth = HTTPDigestAuth(self.username, self.password)
 
-    def resetAuth(self) -> None:
+        # Постоянная сессия вместо requests.request(): переиспользует TCP-соединение
+        # (keep-alive), а не открывает новое на каждый запрос. Терминалы Hikvision
+        # обычно ограничивают число одновременных соединений, поэтому это заодно
+        # снижает риск повторяющегося 401 из-за упора в этот лимит.
+        self.session: requests.Session = requests.Session()
+        self.session.auth = self.auth
+
+    def reset_auth(self) -> None:
         """Сброс и повторная инициализация Digest авторизации."""
         logger.debug("Обновление/сброс объекта HTTPDigestAuth.")
         self.auth = HTTPDigestAuth(self.username, self.password)
+        self.session.auth = self.auth
 
     def request(
         self, method: str, url: str, retries: int = 3, **kwargs: Any
@@ -95,8 +109,8 @@ class HikvisionClient:
                 logger.debug(
                     f"Попытка {attempt}/{retries}: {method} {url}\n"
                 )
-                response = requests.request(
-                    method=method, url=url, auth=self.auth, timeout=30, **kwargs
+                response = self.session.request(
+                    method=method, url=url, timeout=30, **kwargs
                 )
                 
                 if 200 <= response.status_code < 300:
@@ -111,7 +125,7 @@ class HikvisionClient:
                     if attempt == retries:
                         break
                     
-                    self.resetAuth()
+                    self.reset_auth()
                     time.sleep(1)  # Небольшая пауза перед повтором
                     continue
                 
@@ -160,23 +174,23 @@ class AddUserByAutoCard:
 
     def __init__(self, connection: HikvisionClient) -> None:
         self.api = connection
-        self.__ns: Dict[str, str] = {
+        self._ns: Dict[str, str] = {
             "ns": "http://www.isapi.org/ver20/XMLSchema",
         }
 
-    def grantDailyAccessToAll(self, userIds: List[str]) -> None:
+    def grant_daily_access_to_all(self, user_ids: List[str]) -> None:
         """Выдать каждому пользователю 1 доступ."""
         try:
-            for userId in userIds:
-                self.setMaxVisits(userId)
+            for user_id in user_ids:
+                self.set_max_visits(user_id)
             logger.info("Суточный доступ успешно обновлен для всех пользователей.")
         except Exception as e:
             logger.error(f"Ошибка при выдаче суточного доступа: {e}")
 
-    def setMaxVisits(self, employee_no: str) -> None:
+    def set_max_visits(self, employee_no: str) -> None:
         """Установка ограничений на открытие дверей (1 раз в сутки)."""
         url = f"{self.api.base_url}/AccessControl/UserInfo/Modify?format=json"
-        payload = {
+        payload: Dict[str, Dict[str, Any]] = {
             "UserInfo": {
                 "employeeNo": str(employee_no),
                 "maxOpenDoorTime": 1,
@@ -185,25 +199,25 @@ class AddUserByAutoCard:
         }
         self.api.request("PUT", url, headers=self.api.headers_json, json=payload)
     
-    def addPhotoToUserByUrl(self, faceURL: str, employee_no: str) -> str:
+    def add_photo_to_user_by_url(self, face_url: str, employee_no: str) -> str:
         """Привязка фотографии к пользователю по URL."""
-        if not faceURL:
-            raise ValueError("Передан пустой faceURL")
+        if not face_url:
+            raise ValueError("Передан пустой face_url")
 
         url = f"{self.api.base_url}/Intelligent/FDLib/FDSetUp?format=json"
-        payload = {
+        payload: Dict[str, Any] = {
             "faceLibType": "blackFD",
             "FDID": "1",
             "FPID": str(employee_no),
             "bornTime": "1990-01-01",
             "saveFacePic": True,
-            "faceURL": faceURL,
+            "faceURL": face_url,
         }
 
         response = self.api.request("PUT", url, headers=self.api.headers_json, json=payload)
         return response.text
 
-    def addCard(self, card_number: str, employee_no: str) -> str:
+    def add_card(self, card_number: str, employee_no: str) -> str:
         """Привязка карты к ID пользователя."""
         if not card_number:
             raise ValueError("Передан пустой card_number")
@@ -222,13 +236,13 @@ class AddUserByAutoCard:
             response = self.api.request("PUT", request_url, headers=self.api.headers_json, json=data)
         except HikvisionRequestFailed as e:
             logger.error(f"Карта уже добавлена: {e}")
-            if self.extractHikvisionStatusCode(e.last_response) == 6:
+            if self.extract_hikvision_status_code(e.last_response) == 6:
                 logger.warning("Карта уже добавлена.")
                 raise CardAlreadyAssignedError(card_number) from e
             raise
         return response.text
 
-    def extractHikvisionStatusCode(self, response: str) -> Optional[int]:
+    def extract_hikvision_status_code(self, response: Optional[str]) -> Optional[int]:
         """
         Извлекает значение statusCode из ответа устройства Hikvision.
 
@@ -248,8 +262,11 @@ class AddUserByAutoCard:
 
         try:
             data = json.loads(response)
-            if isinstance(data, dict) and "statusCode" in data:
-                return int(data["statusCode"])
+            if isinstance(data, dict):
+                typed_data = cast(Dict[str, Any], data)
+                status_code = typed_data.get("statusCode")
+                if isinstance(status_code, (int, str)):
+                    return int(status_code)
         except (json.JSONDecodeError, ValueError, TypeError):
             pass
 
@@ -265,7 +282,7 @@ class AddUserByAutoCard:
             pass
 
         
-    def getCardnoByTerminal(self) -> str:
+    def get_card_no_by_terminal(self) -> str:
         """Перевод терминала в режим чтения карты и получение её номера."""
         request_url = f"{self.api.base_url}/AccessControl/CaptureCardInfo?format=json"
         logger.info("Команда отправлена. Пожалуйста, приложите карту к терминалу...")
@@ -279,7 +296,7 @@ class AddUserByAutoCard:
             Это отдельная, "ожидаемая" ошибка - сообщаем о ней отдельным исключением,
             чтобы выше (например, в Odoo) можно было показать понятное сообщение пользователю.
             """
-            if self.extractHikvisionStatusCode(e.last_response) == 3:
+            if self.extract_hikvision_status_code(e.last_response) == 3:
                 logger.warning("Карта не была приложена к терминалу в течение отведенного времени.")
                 raise CardCaptureTimeoutError() from e
             raise
@@ -306,7 +323,7 @@ class AddUserByAutoCard:
                 last_response=response.text
             ) from e
 
-    def getFaceTerminal(self) -> str:
+    def get_face_terminal(self) -> str:
         """Запуск команды захвата лица на терминале и получение URL фото."""
         url = f"{self.api.base_url}/AccessControl/CaptureFaceData"
         xml_payload = """<CaptureFaceDataCond xmlns="http://www.isapi.org/ver20/XMLSchema" version="2.0">
@@ -323,14 +340,14 @@ class AddUserByAutoCard:
             Это отдельная, "ожидаемая" ошибка - сообщаем о ней отдельным исключением,
             чтобы выше (например, в Odoo) можно было показать понятное сообщение пользователю.
             """
-            if self.extractHikvisionStatusCode(e.last_response) == 3:
+            if self.extract_hikvision_status_code(e.last_response) == 3:
                 logger.warning("Лицо не было распознано терминалом в течение отведенного времени.")
                 raise FaceCaptureTimeoutError() from e
             raise
 
         try:
             root = ET.fromstring(response.text)
-            face_url_node = root.find("ns:faceDataUrl", self.__ns)
+            face_url_node = root.find("ns:faceDataUrl", self._ns)
 
             if face_url_node is None or not face_url_node.text:
                 raise HikvisionRequestFailed(
@@ -351,10 +368,10 @@ class AddUserByAutoCard:
                 last_response=response.text
             ) from e
         
-    def addUser(self, id_people: str, username: str) -> str:
+    def add_user(self, id_people: str, username: str) -> str:
         """Добавление учетной записи человека (без фото и карты)."""
         request_url = f"{self.api.base_url}/AccessControl/UserInfo/SetUp?format=json"
-        payload = {
+        payload: Dict[str, Dict[str, Any]] = {
             "UserInfo": {
                 "employeeNo": str(id_people),
                 "name": username,
@@ -375,11 +392,11 @@ class AddUserByAutoCard:
         return response.text
 
     # метод для теста, будет вводится с интфейрса в odoo
-    def generaitId(self) -> str:
+    def generate_id(self) -> str:
         """Генерация уникального 7-значного ID."""
         return str(random.randint(1000000, 9999999))
 
-    def cardDelete(self, card_number: str, employee_no: str) -> None:
+    def delete_card(self, card_number: str, employee_no: str) -> None:
         request_url = f"{self.api.base_url}/AccessControl/CardInfo/Delete?format=json"
         data = {
             "CardInfoDelCond": {
@@ -389,42 +406,44 @@ class AddUserByAutoCard:
         }
         self.api.request("PUT", request_url, headers=self.api.headers_json, json=data)
     
-    def deleteAllCardsForUser(self, userId: str, cards: List[str]) -> None:
+    def delete_all_cards_for_user(self, user_id: str, cards: Optional[List[str]]) -> None:
         if cards is None or cards == []:
-            logger.info(f"У пользователя с ИИН {userId} нет карт для удаления.")
+            logger.info(f"У пользователя с ИИН {user_id} нет карт для удаления.")
             return
-        logger.info(f"У пользователя с ИИН {userId} карта {cards} ---")
+        logger.info(f"У пользователя с ИИН {user_id} карта {cards} ---")
         for card in cards:
-            self.cardDelete(card, userId)
+            self.delete_card(card, user_id)
             
     # Оптимизированный поиск карт конкретного пользователя
-    def getAllUserCards(self, userId: str) -> Optional[List[str]]:
+    def get_all_user_cards(self, user_id: str) -> Optional[List[str]]:
         request_url = f'{self.api.base_url}/AccessControl/CardInfo/Search?format=json'
-        data = {
+        data: Dict[str, Dict[str, Any]] = {
             "CardInfoSearchCond": {
                 "searchID": "1",
                 "maxResults": 10,
                 "searchResultPosition": 0,
-                "EmployeeNoList": [{"employeeNo": str(userId)}]
+                "EmployeeNoList": [{"employeeNo": str(user_id)}]
             }
         }  
         response = self.api.request("POST", request_url, headers=self.api.headers_json, json=data)
         cards = response.json().get("CardInfoSearch", {}).get("CardInfo", [])
         return [c.get("cardNo") for c in cards if c.get("cardNo")]
     
-    def downloadFaceUrl(self, url: str, userId: str) -> None:
-        print(f"Downloading face image for user: {userId} url {url}")
+    def download_face_url(self, url: str, user_id: str) -> str:
+        """Скачивает фото лица по URL и сохраняет локально. Возвращает путь к сохранённому файлу."""
+        print(f"Downloading face image for user: {user_id} url {url}")
         img_response = self.api.request("GET", url, headers=self.api.headers_json)
-        if img_response.status_code == 200:
-            file_path = os.path.join(r"C:\Users\Вадим\Desktop\Hickvision&Odoo\prod\photo", f"{userId}.jpg")
-            with open(file_path, "wb") as f:
-                f.write(img_response.content)
+
+        file_path = os.path.join(r"C:\Users\Вадим\Desktop\Hickvision&Odoo\prod\photo", f"{user_id}.jpg")
+        with open(file_path, "wb") as f:
+            f.write(img_response.content)
 
         return file_path
     
-    def addPhotoByPeoplePhoto(self, employee_no: str, photo_path: str):
-        url = f'{self.base_url}/Intelligent/FDLib/FaceDataRecord?format=json'
-        payload = {
+    def add_photo_by_people_photo(self, employee_no: str, photo_path: str) -> str:
+        """Загрузка фото лица напрямую файлом (multipart), в отличие от add_photo_to_user_by_url (по URL)."""
+        url = f'{self.api.base_url}/Intelligent/FDLib/FaceDataRecord?format=json'
+        payload: Dict[str, Any] = {
             "faceLibType": "blackFD",
             "FDID": "1",
             "FPID": employee_no,
@@ -432,28 +451,35 @@ class AddUserByAutoCard:
             "saveFacePic": True,
         }
 
-        files = {
+        files: Dict[str, Any] = {
             "faceURL": (None, json.dumps(payload), "application/json"),
             "img":     ("facePic.jpg", Path(photo_path).read_bytes(), "image/jpeg"),
         }
 
-        response = requests.post(
+        # NOTE: data=payload и files["faceURL"] содержат одни и те же поля дважды —
+        # один раз как обычные multipart-поля, второй раз как JSON внутри "faceURL".
+        # Проверь по документации ISAPI, что терминал ожидает оба варианта сразу,
+        # а не только один из них.
+        response = self.api.request(
+            "POST",
             url,
-            auth=self.api.auth,
             data=payload,
             files=files,
         )
 
         return response.text
-    
+
 if __name__ == "__main__":
     # Настройки для проверки
 
     try:
 
-        ip_address=os.getenv("HIKVISION_IP")
-        username=os.getenv("HIKVISION_USERNAME")
-        password=os.getenv("HIKVISION_PASSWORD")
+        ip_address = os.getenv("HIKVISION_IP")
+        username = os.getenv("HIKVISION_USERNAME")
+        password = os.getenv("HIKVISION_PASSWORD")
+
+        if not ip_address or not username or not password:
+            raise HikvisionError("ip_address, username, password обязательны")
 
         connection = HikvisionClient(
             ip_address=ip_address,
@@ -470,54 +496,54 @@ if __name__ == "__main__":
     )
 
     try:
-        client.grantDailyAccessToAll([])
+        client.grant_daily_access_to_all([])
         username = "ФИО"
-        userId = "1" # метод для теста, будет ИИН человека вводится, уникальный идентификатор
+        user_id = "1" # метод для теста, будет ИИН человека вводится, уникальный идентификатор
         
-        logger.info(f"--- НАЧАЛО ПРОЦЕССА: Создание пользователя {username} с ID {userId} ---")
+        logger.info(f"--- НАЧАЛО ПРОЦЕССА: Создание пользователя {username} с ID {user_id} ---")
 
-        cardIds = client.getAllUserCards(userId)
-        client.deleteAllCardsForUser(userId, cardIds)
+        card_ids = client.get_all_user_cards(user_id)
+        client.delete_all_cards_for_user(user_id, card_ids)
 
         # 1. Считываем карту
         try:
-            cardId = client.getCardnoByTerminal()
-            logger.debug(f"Ответ getFaceTerminal: {cardId}")
+            card_id = client.get_card_no_by_terminal()
+            logger.debug(f"Ответ get_face_terminal: {card_id}")
         except CardCaptureTimeoutError as e:
             logger.warning(f"{e}")
             # вывод в Odoo: odoo.User("Карта не была приложена к терминалу. Попробуйте еще раз.")
             sys.exit(1)
         
         # 3. Добавляем пользователя
-        res_user = client.addUser(userId, username)
-        logger.debug(f"Ответ addUser: {res_user}")
+        res_user = client.add_user(user_id, username)
+        logger.debug(f"Ответ add_user: {res_user}")
 
         # 4. Добавляем карту
         try:
-            res_card = client.addCard(cardId, userId)
-            logger.debug(f"Ответ addCard: {res_card}")
+            res_card = client.add_card(card_id, user_id)
+            logger.debug(f"Ответ add_card: {res_card}")
         except CardAlreadyAssignedError as e:
-            logger.warning(f"Карта с номером {cardId} уже назначена другому пользователю: {e}")
+            logger.warning(f"Карта с номером {card_id} уже назначена другому пользователю: {e}")
             # вывод в Odoo odoo.User("Карта уже занята человеком")
             sys.exit(1)
                 
         try:
-            faceURL = client.getFaceTerminal()
-            logger.debug(f"Ответ getFaceTerminal: {faceURL}")
+            face_url = client.get_face_terminal()
+            logger.debug(f"Ответ get_face_terminal: {face_url}")
         except FaceCaptureTimeoutError as e:    
             logger.warning(f"{e}")
             # вывод в Odoo: odoo.User("Лицо не было распознано терминалом. Попробуйте еще раз.")
             sys.exit(1)
         
-        # # # метод self.api.request автоматически сделает resetAuth(),
+        # # # метод self.api.request автоматически сделает reset_auth(),
         # # # если сессия здесь упадет по 401 ошибке из-за долгого ожидания лица/карты!
         # # # 5. Добавляем лицо человеку
-        client.downloadFaceUrl(faceURL, userId)
+        client.download_face_url(face_url, user_id)
 
-        res_photo = client.addPhotoToUserByUrl(faceURL, userId)
-        logger.debug(f"Ответ addPhotoToUserByUrl: {res_photo}")
+        res_photo = client.add_photo_to_user_by_url(face_url, user_id)
+        logger.debug(f"Ответ add_photo_to_user_by_url: {res_photo}")
 
-        logger.info(f"--- УСПЕХ: Пользователь {username} [ID: {userId}] полностью зарегистрирован ---")
+        logger.info(f"--- УСПЕХ: Пользователь {username} [ID: {user_id}] полностью зарегистрирован ---")
     except HikvisionRequestFailed as e:
         logger.critical(f"Ошибка терминала: {str(e)}", exc_info=True)
         sys.exit(1)
