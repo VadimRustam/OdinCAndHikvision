@@ -4,11 +4,10 @@
 "2dfca092-e013-11e9-435sdfadf-3863bb8069e1": {
         "iin": "1",
         "fio": "а444444444в а444к т444444ы",
-        "is_active": "true",
         "department": "Цех переработки первичной руды (ЦППР)",
         "positions": "Машинист насосных установок (хвостовое хозяйство)",
-        "notAYP": "true",
-        "by": "true"
+        "notAYP": true,
+        "by": true
     },
 
 Содержит бизнес-логику поиска активных сотрудников, и назначение им статусов
@@ -507,9 +506,9 @@ class ZUPDataParser:
 
     def build_active_people_profile(
             self, active_person_ids: Set[str], getiinfio: Dict[str, Dict[str, str]]
-        ) -> Dict[str, Dict[str, str]]:
+        ) -> Dict[str, Dict[str, Any]]:
         """Формирует базовую структуру профиля для активных лиц."""
-        result: Dict[str, Dict[str, str]] = {}
+        result: Dict[str, Dict[str, Any]] = {}
         for physicalFace in active_person_ids:
             if physicalFace in getiinfio:
                 result[physicalFace] = {
@@ -520,8 +519,8 @@ class ZUPDataParser:
         return result
     
     def attach_departments_and_positions(
-            self, activePeopleDepartment: Dict[str, Dict[str, str]], getIdIinFios: Dict[str, Dict[str, str]]
-        ) -> Dict[str, Dict[str, str]]:
+            self, activePeopleDepartment: Dict[str, Dict[str, str]], getIdIinFios: Dict[str, Dict[str, Any]]
+        ) -> Dict[str, Dict[str, Any]]:
         """Связывает текстовые департаменты и должности с профилями физлиц."""
         for id_, info in getIdIinFios.items():
             if id_ in activePeopleDepartment:
@@ -531,8 +530,8 @@ class ZUPDataParser:
         return getIdIinFios
     
     def nonAYP(
-            self, activePeoplesIdFioDepartments: Dict[str, Dict[str, str]]
-        ) -> Dict[str, Dict[str, str]]:
+            self, activePeoplesIdFioDepartments: Dict[str, Dict[str, Any]]
+        ) -> Dict[str, Dict[str, Any]]:
         """Присваивает признак notAYP сотрудникам производственных подразделений."""
         AYP = ["АУП",
                "Отдел IT разработки",
@@ -547,7 +546,7 @@ class ZUPDataParser:
         for activePeoplesIdFioDepartment in activePeoplesIdFioDepartments.values():
             department = activePeoplesIdFioDepartment.get("department")
             if department and department not in AYP:
-                activePeoplesIdFioDepartment["notAYP"] = "true"
+                activePeoplesIdFioDepartment["notAYP"] = True
         
         return activePeoplesIdFioDepartments
 
@@ -581,12 +580,12 @@ class ZUPDataParser:
         return allPeopleBy
      
     def by(
-            self, nonAYPs: Dict[str, Dict[str, str]], getAllPeopleBy: Set[str]
-        ) -> Dict[str, Dict[str, str]]:
+            self, nonAYPs: Dict[str, Dict[str, Any]], getAllPeopleBy: Set[str]
+        ) -> Dict[str, Dict[str, Any]]:
         """Добавляет признак надбавки за вредность (by) активным сотрудникам."""
         for nonAYP in nonAYPs:
             if nonAYP in getAllPeopleBy:
-                nonAYPs[nonAYP]["by"] = "true"
+                nonAYPs[nonAYP]["by"] = True
 
         with open(r"employees.json", "w", encoding="utf-8") as f:
             json.dump(nonAYPs, f, ensure_ascii=False, indent=4)
@@ -608,7 +607,7 @@ class ZUPDataParser:
             )
 
     @measure_time
-    def main(self) -> Optional[Dict[str, Dict[str, str]]]:
+    def main(self) -> Optional[Dict[str, Dict[str, Any]]]:
         try:
             # Получение данных из 1С
             employees_xml = self.safeCall("fetch_employees", self.fetch_employees)
