@@ -28,6 +28,7 @@ from typing import Set
 from typing import List
 from typing import Optional
 from typing import DefaultDict
+from typing import ClassVar
 import requests
 from requests.auth import HTTPBasicAuth
 from utils import normalizeFio
@@ -180,14 +181,15 @@ class ZUPConnection:
 
 class ZUPDataParser:
     """Класс, отвечающий за бизнес-логику и парсинг XML-ответов от 1С."""
-    
+
+    _NS: ClassVar[Dict[str, str]] = {
+        'atom': 'http://www.w3.org/2005/Atom',
+        'm': 'http://schemas.microsoft.com/ado/2007/08/dataservices/metadata',
+        'd': 'http://schemas.microsoft.com/ado/2007/08/dataservices'
+    }
+
     def __init__(self, connection: ZUPConnection) -> None:
         self.api = connection
-        self._ns = {
-            'atom': 'http://www.w3.org/2005/Atom',
-            'm': 'http://schemas.microsoft.com/ado/2007/08/dataservices/metadata',
-            'd': 'http://schemas.microsoft.com/ado/2007/08/dataservices'
-        }
 
     def fetch_employees(self) -> str:
         return self.api.request("Catalog_Сотрудники")
@@ -216,14 +218,14 @@ class ZUPDataParser:
 
         result: Dict[str, str] = {}
 
-        for entry in root.findall("atom:entry", self._ns):
-            props = entry.find('atom:content/m:properties', self._ns)
+        for entry in root.findall("atom:entry", self._NS):
+            props = entry.find('atom:content/m:properties', self._NS)
 
             if props is None:
                 continue
 
-            id_obj = props.find("d:Ref_Key", self._ns)
-            description_obj = props.find("d:Description", self._ns)
+            id_obj = props.find("d:Ref_Key", self._NS)
+            description_obj = props.find("d:Description", self._NS)
 
             id_ = (id_obj.text or "") if id_obj is not None else ""
             description = (description_obj.text or "") if description_obj is not None else ""
@@ -241,14 +243,14 @@ class ZUPDataParser:
 
         departments: Dict[str, str] = {}
 
-        for entry in root.findall("atom:entry", self._ns):
-            props = entry.find('atom:content/m:properties', self._ns)
+        for entry in root.findall("atom:entry", self._NS):
+            props = entry.find('atom:content/m:properties', self._NS)
 
             if props is None:
                 continue
 
-            id_obj = props.find("d:Ref_Key", self._ns)
-            description_obj = props.find("d:Description", self._ns)
+            id_obj = props.find("d:Ref_Key", self._NS)
+            description_obj = props.find("d:Description", self._NS)
 
             if description_obj is None or id_obj is None:
                 continue
@@ -271,23 +273,23 @@ class ZUPDataParser:
 
         root = ET.fromstring(historyWorkingPeople)
 
-        for entry in root.findall("atom:entry", self._ns):
-            props = entry.find('atom:content/m:properties', self._ns)
+        for entry in root.findall("atom:entry", self._NS):
+            props = entry.find('atom:content/m:properties', self._NS)
 
             if props is None:
                 continue
             
-            record_set_obj = props.find("d:RecordSet", self._ns)
+            record_set_obj = props.find("d:RecordSet", self._NS)
 
             if record_set_obj is None:
                 continue
 
-            for prop in record_set_obj.findall("d:element", self._ns):
+            for prop in record_set_obj.findall("d:element", self._NS):
 
-                id_obj = prop.find("d:ФизическоеЛицо_Key", self._ns)
-                date_obj = prop.find("d:Period", self._ns)
-                department_obj = prop.find("d:Подразделение_Key", self._ns)
-                positions_obj = prop.find("d:Должность_Key", self._ns)
+                id_obj = prop.find("d:ФизическоеЛицо_Key", self._NS)
+                date_obj = prop.find("d:Period", self._NS)
+                department_obj = prop.find("d:Подразделение_Key", self._NS)
+                positions_obj = prop.find("d:Должность_Key", self._NS)
 
                 if id_obj is None or date_obj is None or positions_obj is None or department_obj is None:
                     continue
@@ -352,22 +354,22 @@ class ZUPDataParser:
         dataStatusEmployersHistory: DefaultDict[str, List[Dict[str, str]]] = defaultdict(list)
         root = ET.fromstring(statuses_xml)
 
-        for entry in root.findall("atom:entry", self._ns):
+        for entry in root.findall("atom:entry", self._NS):
 
-            props = entry.find("atom:content/m:properties", self._ns)
+            props = entry.find("atom:content/m:properties", self._NS)
 
             if props is None:
                 continue
             
-            record_set_obj = props.find("d:RecordSet", self._ns)
+            record_set_obj = props.find("d:RecordSet", self._NS)
 
             if record_set_obj is not None:
                 
-                for prop in record_set_obj.findall("d:element", self._ns):
+                for prop in record_set_obj.findall("d:element", self._NS):
 
-                    id_obj = prop.find("d:Сотрудник_Key", self._ns)
-                    state_obj = prop.find("d:Состояние", self._ns)
-                    start_obj = prop.find("d:Начало", self._ns)
+                    id_obj = prop.find("d:Сотрудник_Key", self._NS)
+                    state_obj = prop.find("d:Состояние", self._NS)
+                    start_obj = prop.find("d:Начало", self._NS)
 
                     id_ = (id_obj.text or "") if id_obj is not None else ""
                     state = (state_obj.text or "") if state_obj is not None else ""
@@ -417,17 +419,17 @@ class ZUPDataParser:
         root = ET.fromstring(employees_xml)
         activePeople: Set[str] = set()
 
-        for entry in root.findall('atom:entry', self._ns):
-            props = entry.find('atom:content/m:properties', self._ns)
+        for entry in root.findall('atom:entry', self._NS):
+            props = entry.find('atom:content/m:properties', self._NS)
 
             if props is None:
                 continue
 
-            delition_obj = props.find("d:DeletionMark", self._ns)
-            archive_obj = props.find("d:ВАрхиве", self._ns)
-            id_obj = props.find("d:Ref_Key", self._ns)
-            description_obj = props.find("d:Description", self._ns)
-            physicalFace_obj = props.find("d:ФизическоеЛицо_Key", self._ns)
+            delition_obj = props.find("d:DeletionMark", self._NS)
+            archive_obj = props.find("d:ВАрхиве", self._NS)
+            id_obj = props.find("d:Ref_Key", self._NS)
+            description_obj = props.find("d:Description", self._NS)
+            physicalFace_obj = props.find("d:ФизическоеЛицо_Key", self._NS)
 
 
             delition = (delition_obj.text or "") if delition_obj is not None else ""
@@ -452,15 +454,15 @@ class ZUPDataParser:
         root = ET.fromstring(information)
         idiinfio: Dict[str, Dict[str, str]] = {}
 
-        for entry in root.findall("atom:entry", self._ns):
-            props = entry.find("atom:content/m:properties", self._ns)
+        for entry in root.findall("atom:entry", self._NS):
+            props = entry.find("atom:content/m:properties", self._NS)
 
             if props is None:
                 continue
 
-            id_obj = props.find("d:Ref_Key", self._ns)
-            iin_obj = props.find("d:ИНН", self._ns)
-            fio_obj = props.find("d:ФИО", self._ns)
+            id_obj = props.find("d:Ref_Key", self._NS)
+            iin_obj = props.find("d:ИНН", self._NS)
+            fio_obj = props.find("d:ФИО", self._NS)
 
             iin = (iin_obj.text or "") if iin_obj is not None else ""
             fio = (fio_obj.text or "") if fio_obj is not None else ""
@@ -526,14 +528,14 @@ class ZUPDataParser:
         root = ET.fromstring(currentPayRate)
         allPeopleBy: Set[str] = set()
         
-        for entry in root.findall('atom:entry', self._ns):
-            props = entry.find('atom:content/m:properties', self._ns)
+        for entry in root.findall('atom:entry', self._NS):
+            props = entry.find('atom:content/m:properties', self._NS)
 
             if props is None:
                 continue
 
-            phys_id_obj = props.find('d:ФизическоеЛицо_Key', self._ns)
-            bonus_obj = props.find('d:ТекущаяНадбавка', self._ns)
+            phys_id_obj = props.find('d:ФизическоеЛицо_Key', self._NS)
+            bonus_obj = props.find('d:ТекущаяНадбавка', self._NS)
 
             person_id = (phys_id_obj.text or "") if phys_id_obj is not None else ""
             bonus = (
