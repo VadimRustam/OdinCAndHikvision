@@ -28,6 +28,8 @@ import time
 from typing import Any, Callable, Dict
 from typing import Set
 from typing import List
+from typing import Optional
+from typing import DefaultDict
 import requests
 from requests.auth import HTTPBasicAuth
 from utils import normalizeFio
@@ -50,11 +52,11 @@ class ZupmainRequestFailed(Exception):
         self,
         endpoint: str,
         message: str,
-        status_code: int = None ,
-        error_type: str = "UNKNOWN",
-        last_error=None,
-        last_response=None
-    ):
+        status_code: Optional[int] = None,
+        error_type: Optional[str] = "UNKNOWN",
+        last_error: Optional[BaseException] = None,
+        last_response: Optional[str] = None
+    ) -> None:
         self.endpoint = endpoint
         self.status_code = status_code
         self.error_type = error_type
@@ -79,7 +81,7 @@ class ZupmainCredentialError(Exception):
 
 class ZupmainsafeCall(Exception):
     """Ошибка при парсинге или обработке конкретного этапа данных XML."""
-    def __init__(self, stage, message, original_error=None):
+    def __init__(self, stage: str, message: str, original_error: Optional[BaseException] = None) -> None:
         self.stage = stage
         self.original_error = original_error
 
@@ -112,14 +114,14 @@ class ZUPConnection:
         logger.debug("Сброс HTTPBasicAuth")
         self.auth = HTTPBasicAuth(self.username, self.password)
 
-    def request(self, endpoint: str, retries: int = 5):
+    def request(self, endpoint: str, retries: int = 5) -> str:
         """Выполняет HTTP GET запрос к указанному эндпоинту с механизмом повторения."""
         url = f"{self.url}/{endpoint}"
 
-        last_error = None
-        last_response = None
-        last_status = None
-        error_type = None
+        last_error: Optional[BaseException] = None
+        last_response: Optional[str] = None
+        last_status: Optional[int] = None
+        error_type: Optional[str] = None
 
         auth_attempted = False
 
@@ -242,7 +244,7 @@ class ZUPDataParser:
         """Парсит справочник должностей из XML."""
         root = ET.fromstring(positions)
 
-        positions = {}
+        result: Dict[str, str] = {}
 
         for entry in root.findall("atom:entry", self._ns):
             props = entry.find('atom:content/m:properties', self._ns)
@@ -259,15 +261,15 @@ class ZUPDataParser:
             if description == "" or id_ == "":
                 continue
 
-            positions[id_] = description
+            result[id_] = description
 
-        return positions 
+        return result
 
     def parse_departments_catalog(self, department: str) -> Dict[str, str]:
         """Парсит справочник подразделений из XML."""
         root = ET.fromstring(department)
 
-        departments = {}
+        departments: Dict[str, str] = {}
 
         for entry in root.findall("atom:entry", self._ns):
             props = entry.find('atom:content/m:properties', self._ns)
@@ -281,8 +283,8 @@ class ZUPDataParser:
             if description_obj is None or id_obj is None:
                 continue
 
-            id_ = (id_obj.text or "") if id_obj is not None else ""
-            description = (description_obj.text or "") if description_obj is not None else ""
+            id_ = id_obj.text or ""
+            description = description_obj.text or ""
             
             if description == "" or id_ == "":
                 continue
@@ -295,7 +297,7 @@ class ZUPDataParser:
             self, historyWorkingPeople: str, active_person_ids: Set[str]
         ) -> Dict[str, List[Dict[str, str]]]:
         """Строит историю кадровых изменений для активных физлиц."""
-        idPositionsDepartment = defaultdict(list)
+        idPositionsDepartment: DefaultDict[str, List[Dict[str, str]]] = defaultdict(list)
 
         root = ET.fromstring(historyWorkingPeople)
 
@@ -311,9 +313,6 @@ class ZUPDataParser:
                 continue
 
             for prop in record_set_obj.findall("d:element", self._ns):
-                
-                if prop is None:
-                    continue
 
                 id_obj = prop.find("d:ФизическоеЛицо_Key", self._ns)
                 date_obj = prop.find("d:Period", self._ns)
@@ -323,10 +322,10 @@ class ZUPDataParser:
                 if id_obj is None or date_obj is None or positions_obj is None or department_obj is None:
                     continue
 
-                date = (date_obj.text or "") if date_obj is not None else ""
-                id_ = (id_obj.text or "") if id_obj is not None else ""
-                department = (department_obj.text or "") if department_obj is not None else ""
-                positions = (positions_obj.text or "") if positions_obj is not None else ""
+                date = date_obj.text or ""
+                id_ = id_obj.text or ""
+                department = department_obj.text or ""
+                positions = positions_obj.text or ""
                 
                 if date == "" or id_ == "" or positions == "" or department == "":
                     continue
@@ -344,7 +343,7 @@ class ZUPDataParser:
         self, peoplePhysidDepartmentPositions: Dict[str, List[Dict[str, str]]]
     ) -> Dict[str, Dict[str, str]]:
         """Выбирает актуальные подразделение и должность для каждого физлица."""
-        departmentPositions = {}
+        departmentPositions: Dict[str, Dict[str, str]] = {}
 
         for person_id, records in peoplePhysidDepartmentPositions.items():
             if not records:
@@ -378,9 +377,9 @@ class ZUPDataParser:
 
         return peopleDepartmentPosition
 
-    def build_employee_status_history(self, statuses_xml) -> Dict[str, List[Dict[str, str]]]:
+    def build_employee_status_history(self, statuses_xml: str) -> Dict[str, List[Dict[str, str]]]:
         """Собирает историю состояний (статусов) сотрудников из XML."""
-        dataStatusEmployersHistory = defaultdict(list)
+        dataStatusEmployersHistory: DefaultDict[str, List[Dict[str, str]]] = defaultdict(list)
         root = ET.fromstring(statuses_xml)
 
         for entry in root.findall("atom:entry", self._ns):
@@ -411,9 +410,9 @@ class ZUPDataParser:
 
         return dataStatusEmployersHistory
     
-    def get_active_employee_ids(self, dataStatusEmployersHistory) -> Set[str]:
-        activePeopleIdState = {}
-        active_ids = set()
+    def get_active_employee_ids(self, dataStatusEmployersHistory: Dict[str, List[Dict[str, str]]]) -> Set[str]:
+        activePeopleIdState: Dict[str, str] = {}
+        active_ids: Set[str] = set()
         
         # Приоритет состояний (выше число = выше приоритет при одинаковой дате)
         STATE_PRIORITY = {
@@ -443,10 +442,10 @@ class ZUPDataParser:
         
         return active_ids
 
-    def build_active_physical_persons(self, defineWorkingPeople, employees_xml) -> Set[str]:
+    def build_active_physical_persons(self, defineWorkingPeople: Set[str], employees_xml: str) -> Set[str]:
         """Фильтрует архивные записи и сопоставляет активных сотрудников с ID физлиц."""
         root = ET.fromstring(employees_xml)
-        activePeople = set()
+        activePeople: Set[str] = set()
 
         for entry in root.findall('atom:entry', self._ns):
             props = entry.find('atom:content/m:properties', self._ns)
@@ -481,7 +480,7 @@ class ZUPDataParser:
     def parse_individuals(self, information: str) -> Dict[str, Dict[str, str]]:
         """Парсит персональные данные физлиц (ИИН, ФИО)."""
         root = ET.fromstring(information)
-        idiinfio = {}
+        idiinfio: Dict[str, Dict[str, str]] = {}
 
         for entry in root.findall("atom:entry", self._ns):
             props = entry.find("atom:content/m:properties", self._ns)
@@ -510,7 +509,7 @@ class ZUPDataParser:
             self, active_person_ids: Set[str], getiinfio: Dict[str, Dict[str, str]]
         ) -> Dict[str, Dict[str, str]]:
         """Формирует базовую структуру профиля для активных лиц."""
-        result = {}
+        result: Dict[str, Dict[str, str]] = {}
         for physicalFace in active_person_ids:
             if physicalFace in getiinfio:
                 result[physicalFace] = {
@@ -556,7 +555,7 @@ class ZUPDataParser:
     def get_hazard_pay_employees(self, currentPayRate: str) -> Set[str]:
         """Выявляет физлиц, имеющих надбавку за вредные условия труда."""
         root = ET.fromstring(currentPayRate)
-        allPeopleBy = set()
+        allPeopleBy: Set[str] = set()
         
         for entry in root.findall('atom:entry', self._ns):
             props = entry.find('atom:content/m:properties', self._ns)
@@ -568,7 +567,11 @@ class ZUPDataParser:
             bonus_obj = props.find('d:ТекущаяНадбавка', self._ns)
 
             person_id = (phys_id_obj.text or "") if phys_id_obj is not None else ""
-            bonus = float(bonus_obj.text) if bonus_obj is not None else 0
+            bonus = (
+                float(bonus_obj.text)
+                if bonus_obj is not None and bonus_obj.text is not None
+                else 0.0
+            )
 
             if person_id == "":
                 continue
@@ -606,7 +609,7 @@ class ZUPDataParser:
             )
 
     @measure_time
-    def main(self):
+    def main(self) -> Optional[Dict[str, Dict[str, str]]]:
         try:
             # Получение данных из 1С
             employees_xml = self.safeCall("fetch_employees", self.fetch_employees)
@@ -699,9 +702,12 @@ if __name__ == "__main__":
 
     try:
 
-        zup_url=os.getenv("ZUP_URL")
-        zup_username=os.getenv("ZUP_USERNAME")
-        zup_password=os.getenv("ZUP_PASSWORD")
+        zup_url = os.getenv("ZUP_URL")
+        zup_username = os.getenv("ZUP_USERNAME")
+        zup_password = os.getenv("ZUP_PASSWORD")
+
+        if not zup_url or not zup_username or not zup_password:
+            raise ZupmainCredentialError("ip_address, username, password обязательны")
 
         connectionZUPmain = ZUPConnection(
             url=zup_url,
@@ -711,10 +717,10 @@ if __name__ == "__main__":
         clientZUPmain = ZUPDataParser(
             connection=connectionZUPmain,
         )
+
+        data = clientZUPmain.main()
+
     except ZupmainCredentialError as e:
         logger.critical("Данные логина, пароля, url либо не заполненны, либо не верные")
-            
-    try:
-        data = clientZUPmain.main()
     except Exception as e:
         logger.error(f"Ошибка выполнения: {e}")
