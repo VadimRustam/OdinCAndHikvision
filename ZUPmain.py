@@ -23,7 +23,6 @@ import json
 import os
 import xml.etree.ElementTree as ET
 import logging
-import time
 from typing import Any, Callable, Dict
 from typing import Set
 from typing import List
@@ -108,13 +107,8 @@ class ZUPConnection:
         self.password: str = password.strip()
         self.auth = HTTPBasicAuth(self.username, self.password)
 
-    def resetAuth(self) -> None:
-        """Перевыпуск объекта авторизации."""
-        logger.debug("Сброс HTTPBasicAuth")
-        self.auth = HTTPBasicAuth(self.username, self.password)
-
-    def request(self, endpoint: str, retries: int = 5) -> str:
-        """Выполняет HTTP GET запрос к указанному эндпоинту с механизмом повторения."""
+    def request(self, endpoint: str) -> str:
+        """Выполняет HTTP GET запрос к указанному эндпоинту."""
         url = f"{self.url}/{endpoint}"
 
         last_error: Optional[BaseException] = None
@@ -122,84 +116,61 @@ class ZUPConnection:
         last_status: Optional[int] = None
         error_type: Optional[str] = None
 
-        auth_attempted = False
+        try:
+            response = requests.get(
+                url=url,
+                auth=self.auth,
+                timeout=30
+            )
 
-        for attempt in range(1, retries + 1):
+            status = response.status_code
 
-            try:
-                response = requests.get(
-                    url=url,
-                    auth=self.auth,
-                    timeout=30
+            if 200 <= status < 300:
+                return response.text
+
+            if status == 401:
+
+                last_status = status
+                last_response = response.text
+                error_type = "AUTH_ERROR"
+
+            elif 400 <= status < 500:
+
+                last_status = status
+                last_response = response.text
+                error_type = "CLIENT_ERROR"
+
+                raise ZupmainRequestFailed(
+                    endpoint,
+                    "Client error",
+                    status_code=status,
+                    error_type=error_type,
+                    last_response=last_response
                 )
 
-                status = response.status_code
+            elif 500 <= status < 600:
 
-                if 200 <= status < 300:
-                    return response.text
+                last_status = status
+                last_response = response.text
+                error_type = "SERVER_ERROR"
 
-                if status == 401:
-
-                    last_status = status
-                    last_response = response.text
-                    error_type = "AUTH_ERROR"
-
-                    if auth_attempted:
-                        break
-
-                    auth_attempted = True
-                    self.resetAuth()
-                    continue
-
-                if 400 <= status < 500:
-
-                    last_status = status
-                    last_response = response.text
-                    error_type = "CLIENT_ERROR"
-
-                    raise ZupmainRequestFailed(
-                        endpoint,
-                        "Client error",
-                        status_code=status,
-                        error_type=error_type,
-                        last_response=last_response
-                    )
-
-                if 500 <= status < 600:
-
-                    last_status = status
-                    last_response = response.text
-                    error_type = "SERVER_ERROR"
-
-                    if attempt == retries:
-                        break
-
-                    time.sleep(attempt * 10)
-                    continue
+            else:
 
                 last_status = status
                 last_response = response.text
                 error_type = "UNKNOWN_HTTP"
 
-                break
+        except (
+            requests.Timeout,
+            requests.ConnectionError
+        ) as e:
 
-            except (
-                requests.Timeout,
-                requests.ConnectionError
-            ) as e:
-
-                last_error = e
-                error_type = "NETWORK_ERROR"
-
-                if attempt == retries:
-                    break
-
-                time.sleep(attempt * 10)
-                continue
+            last_error = e
+            error_type = "NETWORK_ERROR"
 
         raise ZupmainRequestFailed(
             endpoint,
-            "Request failed after retries",
+            "Request failed",
             status_code=last_status,
             error_type=error_type,
             last_error=last_error,
