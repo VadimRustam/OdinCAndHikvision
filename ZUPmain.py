@@ -515,7 +515,6 @@ class ZUPDataParser:
                 result[physicalFace] = {
                     "iin":getiinfio[physicalFace]["iin"],
                     "fio": getiinfio[physicalFace]["fio"],
-                    "is_active": "true"
                 }
 
         return result
