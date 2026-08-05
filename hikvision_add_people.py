@@ -21,7 +21,6 @@ __author__ = "Вадим Рустамович"
 import logging
 from pathlib import Path
 import random
-import time
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, cast
 import requests
@@ -295,7 +294,7 @@ class AddUserByAutoCard:
             }
             root = ET.fromstring(response)
             status = root.find("ns:statusCode", ns)
-            if status is not None and status.text is not None:
+            if status is not None and status.text is not None: # Должно быть status.text.strip() != "", как будто так лучше
                 return int(status.text.strip())
         except (ET.ParseError, ValueError):
             pass
