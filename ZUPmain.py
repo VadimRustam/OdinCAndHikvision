@@ -29,6 +29,7 @@ from typing import List
 from typing import Optional
 from typing import DefaultDict
 from typing import ClassVar
+from typing import TypedDict
 import requests
 from requests.auth import HTTPBasicAuth
 from utils import normalizeFio
@@ -44,6 +45,22 @@ logging.basicConfig(
 logger = logging.getLogger("ZUPIntegration")
 
 load_dotenv(override=True)
+
+
+class EmployeeRecord(TypedDict, total=False):
+    """Итоговая запись о сотруднике.
+
+    total=False означает, что не все поля обязаны присутствовать:
+    department/positions добавляются только если найдено соответствие
+    в справочниках, notAYP/by — только если признак выполнен.
+    """
+    iin: str
+    fio: str
+    department: str
+    positions: str
+    notAYP: bool
+    by: bool
+
 
 class ZupmainRequestFailed(Exception):
 
@@ -337,7 +354,7 @@ class ZUPDataParser:
         positionsCatalog: Dict[str, str]
     ) -> Dict[str, Dict[str, str]]:
         """Заменяет ID должностей и департаментов на их текстовые описания."""
-        for _, info in peopleDepartmentPosition.items():
+        for info in peopleDepartmentPosition.values():
             department_id = info.get("department_id")
             position_id = info.get("positions_id")
 
@@ -479,9 +496,9 @@ class ZUPDataParser:
 
     def build_active_people_profile(
             self, active_person_ids: Set[str], getiinfio: Dict[str, Dict[str, str]]
-        ) -> Dict[str, Dict[str, Any]]:
+        ) -> Dict[str, EmployeeRecord]:
         """Формирует базовую структуру профиля для активных лиц."""
-        result: Dict[str, Dict[str, Any]] = {}
+        result: Dict[str, EmployeeRecord] = {}
         for physicalFace in active_person_ids:
             if physicalFace in getiinfio:
                 result[physicalFace] = {
@@ -492,8 +509,8 @@ class ZUPDataParser:
         return result
     
     def attach_departments_and_positions(
-            self, activePeopleDepartment: Dict[str, Dict[str, str]], getIdIinFios: Dict[str, Dict[str, Any]]
-        ) -> Dict[str, Dict[str, Any]]:
+            self, activePeopleDepartment: Dict[str, Dict[str, str]], getIdIinFios: Dict[str, EmployeeRecord]
+        ) -> Dict[str, EmployeeRecord]:
         """Связывает текстовые департаменты и должности с профилями физлиц."""
         for id_, info in getIdIinFios.items():
             if id_ in activePeopleDepartment:
@@ -503,8 +520,8 @@ class ZUPDataParser:
         return getIdIinFios
     
     def nonAYP(
-            self, activePeoplesIdFioDepartments: Dict[str, Dict[str, Any]]
-        ) -> Dict[str, Dict[str, Any]]:
+            self, activePeoplesIdFioDepartments: Dict[str, EmployeeRecord]
+        ) -> Dict[str, EmployeeRecord]:
         """Присваивает признак notAYP сотрудникам производственных подразделений."""
         AYP = ["АУП",
                "Отдел IT разработки",
@@ -553,8 +570,8 @@ class ZUPDataParser:
         return allPeopleBy
      
     def by(
-            self, nonAYPs: Dict[str, Dict[str, Any]], getAllPeopleBy: Set[str]
-        ) -> Dict[str, Dict[str, Any]]:
+            self, nonAYPs: Dict[str, EmployeeRecord], getAllPeopleBy: Set[str]
+        ) -> Dict[str, EmployeeRecord]:
         """Добавляет признак надбавки за вредность (by) активным сотрудникам."""
         for nonAYP in nonAYPs:
             if nonAYP in getAllPeopleBy:
@@ -580,7 +597,7 @@ class ZUPDataParser:
             )
 
     @measure_time
-    def main(self) -> Optional[Dict[str, Dict[str, Any]]]:
+    def main(self) -> Optional[Dict[str, EmployeeRecord]]:
         try:
             # Получение данных из 1С
             employees_xml = self.safeCall("fetch_employees", self.fetch_employees)
